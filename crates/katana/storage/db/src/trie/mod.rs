@@ -361,7 +361,6 @@ where
 
     // TODO: check if the snapshot exist
     fn transaction(&self, id: CommitId) -> Option<(CommitId, Self::Transaction<'_>)> {
-        dbg!("getting snapshot", id);
         Some((id, SnapshotTrieDb::new(self.tx.clone(), id)))
     }
 }
@@ -377,5 +376,27 @@ fn to_db_key(key: &DatabaseKey<'_>) -> models::trie::TrieDatabaseKey {
         DatabaseKey::TrieLog(bytes) => {
             TrieDatabaseKey { key: bytes.to_vec(), r#type: TrieDatabaseKeyType::TrieLog }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use katana_primitives::felt;
+    use katana_trie::{BonsaiDatabase, ClassesTrie};
+
+    use super::{TrieDb, TrieDbMut};
+    use crate::{abstraction::Database, mdbx::test_utils, tables};
+
+    #[test]
+    fn snapshot() {
+        let db = test_utils::create_test_db();
+        let db_tx = db.tx_mut().expect("failed to get tx");
+
+        let key = felt!("0x1337");
+        let value = felt!("0xdeadbeef");
+
+        let mut trie = ClassesTrie::new(TrieDbMut::<tables::ClassesTrie, _>::new(&db_tx));
+        trie.insert(key, value);
+        trie.commit(0);
     }
 }
