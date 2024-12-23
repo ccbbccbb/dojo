@@ -382,21 +382,94 @@ fn to_db_key(key: &DatabaseKey<'_>) -> models::trie::TrieDatabaseKey {
 #[cfg(test)]
 mod tests {
     use katana_primitives::felt;
-    use katana_trie::{BonsaiDatabase, ClassesTrie};
+    use katana_primitives::hash;
+    use katana_primitives::hash::StarkHash;
+    use katana_trie::{BonsaiDatabase, ClassesTrie, CommitId};
+    use starknet::macros::short_string;
 
     use super::{TrieDb, TrieDbMut};
-    use crate::{abstraction::Database, mdbx::test_utils, tables};
+    use crate::{abstraction::Database, mdbx::test_utils, tables, trie::SnapshotTrieDb};
 
     #[test]
     fn snapshot() {
         let db = test_utils::create_test_db();
         let db_tx = db.tx_mut().expect("failed to get tx");
 
-        let key = felt!("0x1337");
-        let value = felt!("0xdeadbeef");
-
         let mut trie = ClassesTrie::new(TrieDbMut::<tables::ClassesTrie, _>::new(&db_tx));
-        trie.insert(key, value);
-        trie.commit(0);
+
+        let root0 = {
+            let entries = [
+                (felt!("0x9999"), felt!("0xdead")),
+                (felt!("0x5555"), felt!("0xbeef")),
+                (felt!("0x1337"), felt!("0xdeadbeef")),
+            ];
+
+            for (key, value) in entries {
+                trie.insert(key, value);
+            }
+
+            trie.commit(0);
+            trie.root()
+        };
+
+        let root1 = {
+            let entries = [
+                (felt!("0x6969"), felt!("0x80085")),
+                (felt!("0x3333"), felt!("0x420")),
+                (felt!("0x2222"), felt!("0x7171")),
+            ];
+
+            for (key, value) in entries {
+                trie.insert(key, value);
+            }
+
+            trie.commit(1);
+            trie.root()
+        };
+
+        assert_ne!(root0, root1);
+
+        {
+            let db = SnapshotTrieDb::<tables::ClassesTrie, _>::new(&db_tx, CommitId::new(0));
+            let mut snapshot0 = ClassesTrie::new(db);
+
+            let snapshot_root0 = snapshot0.root();
+            assert_eq!(snapshot_root0, root0);
+
+            let proofs0 = snapshot0.multiproof(vec![felt!("0x9999")]);
+            let verify_result0 = snapshot0.verify_proof(&proofs0, vec![felt!("0x9999")]);
+
+            let value =
+                hash::Poseidon::hash(&short_string!("CONTRACT_CLASS_LEAF_V0"), &felt!("0xdead"));
+            assert_eq!(vec![value], verify_result0);
+        }
+
+        {
+            let commit = CommitId::new(1);
+            let mut snapshot1 =
+                ClassesTrie::new(SnapshotTrieDb::<tables::ClassesTrie, _>::new(&db_tx, commit));
+
+            let snapshot_root1 = snapshot1.root();
+            assert_eq!(snapshot_root1, root1);
+
+            let proofs1 = snapshot1.multiproof(vec![felt!("0x6969")]);
+            let verify_result1 = snapshot1.verify_proof(&proofs1, vec![felt!("0x6969")]);
+
+            let value =
+                hash::Poseidon::hash(&short_string!("CONTRACT_CLASS_LEAF_V0"), &felt!("0x80085"));
+            assert_eq!(dbg!(vec![value]), dbg!(verify_result1));
+        }
+
+        {
+            let proofs = trie.multiproof(vec![felt!("0x6969"), felt!("0x9999")]);
+            let result = trie.verify_proof(&proofs, vec![felt!("0x6969"), felt!("0x9999")]);
+
+            let value0 =
+                hash::Poseidon::hash(&short_string!("CONTRACT_CLASS_LEAF_V0"), &felt!("0x80085"));
+            let value1 =
+                hash::Poseidon::hash(&short_string!("CONTRACT_CLASS_LEAF_V0"), &felt!("0xdead"));
+
+            assert_eq!(dbg!(vec![value0, value1]), dbg!(result));
+        }
     }
 }

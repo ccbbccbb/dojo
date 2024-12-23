@@ -1,10 +1,10 @@
+use std::usize;
+
 use bitvec::array::BitArray;
-use bitvec::order::Msb0;
-use bitvec::vec::BitVec;
 use bitvec::view::AsBits;
-pub use bonsai::{MultiProof, Path, ProofNode};
-pub use bonsai_trie::{BonsaiDatabase, BonsaiPersistentDatabase};
-use bonsai_trie::{BonsaiStorage, BonsaiStorageConfig};
+pub use bonsai::{BitVec, MultiProof, Path, ProofNode};
+use bonsai_trie::BonsaiStorage;
+pub use bonsai_trie::{BonsaiDatabase, BonsaiPersistentDatabase, BonsaiStorageConfig};
 use katana_primitives::class::ClassHash;
 use katana_primitives::Felt;
 use starknet_types_core::hash::{Pedersen, StarkHash};
@@ -41,8 +41,13 @@ where
 {
     pub fn new(db: DB) -> Self {
         let config = BonsaiStorageConfig {
-            max_saved_trie_logs: Some(usize::MAX),
-            max_saved_snapshots: Some(usize::MAX),
+            // we have our own implementation of storing trie changes
+            max_saved_trie_logs: Some(0),
+            // in the bonsai-trie crate, this field seems to be only used in rocksdb impl.
+            // i dont understand why would they add a config thats implementation specific ????
+            //
+            // this config should be used by our implementation of the BonsaiPersistentDatabase::snapshot()
+            max_saved_snapshots: Some(64usize),
             snapshot_interval: 1,
         };
 
@@ -68,6 +73,12 @@ where
 
         self.storage.get_multi_proof(id, keys).expect("failed to get multiproof")
     }
+
+    pub fn verify_proof(&self, id: &[u8], proofs: &MultiProof, keys: Vec<Felt>) -> Vec<Felt> {
+        let keys = keys.into_iter().map(|f| f.to_bytes_be().as_bits()[5..].to_owned());
+        let root = self.root(id);
+        proofs.verify_proof::<Hash>(root, keys, 251).collect::<Result<Vec<Felt>, _>>().unwrap()
+    }
 }
 
 impl<DB, Hash> BonsaiTrie<DB, Hash>
@@ -76,7 +87,7 @@ where
     Hash: StarkHash + Send + Sync,
 {
     pub fn insert(&mut self, id: &[u8], key: Felt, value: Felt) {
-        let key: BitVec<u8, Msb0> = key.to_bytes_be().as_bits()[5..].to_owned();
+        let key: BitVec = key.to_bytes_be().as_bits()[5..].to_owned();
         self.storage.insert(id, &key, &value).unwrap();
     }
 

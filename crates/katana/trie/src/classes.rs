@@ -1,10 +1,11 @@
-use bonsai_trie::{BonsaiDatabase, BonsaiPersistentDatabase, MultiProof};
+use bitvec::view::AsBits;
+use bonsai_trie::{BitVec, BonsaiDatabase, BonsaiPersistentDatabase, MultiProof};
 use katana_primitives::block::BlockNumber;
 use katana_primitives::class::{ClassHash, CompiledClassHash};
 use katana_primitives::hash::Pedersen;
 use katana_primitives::Felt;
 use starknet::macros::short_string;
-use starknet_types_core::hash::{Poseidon, StarkHash};
+use starknet_types_core::hash::{self, Poseidon, StarkHash};
 
 use crate::id::CommitId;
 
@@ -26,6 +27,10 @@ impl<DB: BonsaiDatabase> ClassesTrie<DB> {
 
     pub fn multiproof(&mut self, class_hashes: Vec<ClassHash>) -> MultiProof {
         self.trie.multiproof(Self::BONSAI_IDENTIFIER, class_hashes)
+    }
+
+    pub fn verify_proof(&self, proofs: &MultiProof, class_hashes: Vec<ClassHash>) -> Vec<Felt> {
+        self.trie.verify_proof(Self::BONSAI_IDENTIFIER, proofs, class_hashes)
     }
 }
 
